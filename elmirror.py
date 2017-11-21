@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import logging
+import logging, requests
 from requests.packages.urllib3.util import Retry
 from requests import exceptions
 from requests.adapters import HTTPAdapter
@@ -11,10 +11,8 @@ logger = logging.getLogger(__name__)
 session = None # Initialize per worker.
 
 def create_package_url(name_pkg, version):
-    return "https://github.com/%{name_pkg}s/zipball/%{version}s/" % {
-        'name_pkg': name_pkg,
-        'version': version
-    }
+     return "https://github.com/{name_pkg}/zipball/{version}/" \
+        .format(name_pkg=name_pkg, version=version)
 
 def setup_session():
     global session
@@ -52,5 +50,15 @@ def setup_session():
 #         ]
 #     },
 # ...
-def get_all_package_names(session = setup_session()):
-    return session.get(BASE_URL + "all-packages")
+def get_all_package_versions(session = setup_session()):
+    data = session.get(BASE_URL + "all-packages").json()
+    return [ (pkg.get('name'), version)
+             for pkg in data
+             for version in reversed(sorted(pkg.get('versions', []))) ]
+
+def main():
+    (n, v) = get_all_package_versions()[0]
+    print(create_package_url(n, v))
+
+if __name__ == "__main__":
+    main()
