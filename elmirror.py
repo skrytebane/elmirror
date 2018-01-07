@@ -71,8 +71,7 @@ def mirror_package(name, no_update=False, session=setup_session()):
                          check=True)
 
 def get_package_index(session = setup_session()):
-     """Return a list of all (name, version) tuples
-from the Elm package index."""
+     "Return the Elm package index and also store it in PACKAGE_ROOT."
      logger.info('Fetching package index...')
      data = session.get(BASE_URL + "all-packages").text
      with open(os.path.join(PACKAGE_ROOT, 'all-packages'), 'w') as out:
