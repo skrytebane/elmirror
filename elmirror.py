@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import logging, requests, os, sys
+import logging, requests, os, sys, argparse
 from urllib.parse import urlparse
 from requests.packages.urllib3.util import Retry
 from requests import exceptions
@@ -65,11 +65,35 @@ from the Elm package index."""
               for pkg in data
               for version in reversed(sorted(pkg.get('versions', []))) ]
 
-def main():
+def setup():
+     parser = argparse.ArgumentParser()
+     parser.add_argument('-d', '--destination-directory',
+                         help='Destination directory for downloaded files.',
+                         default=PACKAGE_ROOT)
+     parser.add_argument('-b', '--base-url',
+                         help='Elm packages base URL.',
+                         default=BASE_URL)
+     parser.add_argument('-v', '--verbose',
+                         help='Enable verbose output.',
+                         action='store_true')
+     parser.add_argument('-q', '--quiet',
+                         help='Quiet execution.',
+                         action='store_true')
+
+     args = parser.parse_args()
+
+     level = logging.ERROR if args.quiet else \
+             (logging.DEBUG if args.verbose else logging.INFO)
+
      logging.basicConfig(
           stream=sys.stderr,
-          level=logging.INFO,
+          level=level,
           format="%(asctime)s:%(levelname)s:%(module)s:%(funcName)s: %(message)s")
+
+     return args
+
+def main():
+     args = setup()
 
      (n, v) = get_all_package_versions()[0]
      fetch_package(n, v)
