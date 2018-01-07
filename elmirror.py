@@ -36,7 +36,7 @@ def package_user_path(url):
 
 def package_full_path(url):
      path_part = urlparse(url).path.strip('/')
-     return os.path.join(PACKAGE_ROOT, path_part + '.git')
+     return os.path.join(PACKAGE_ROOT, path_part)
 
 def ensure_path_exists(path):
      os.makedirs(path, mode=0o755, exist_ok=True)
