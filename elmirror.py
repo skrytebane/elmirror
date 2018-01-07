@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import logging, requests, os, sys, argparse
+import logging, requests, os, sys, argparse, json, subprocess
 from urllib.parse import urlparse
 from requests.packages.urllib3.util import Retry
 from requests import exceptions
@@ -26,53 +26,72 @@ def setup_session():
      session.mount('https://', HTTPAdapter(max_retries = retry_strategy))
      return session
 
-def package_url(name, version):
-     return "https://github.com/{name}/zipball/{version}/" \
-          .format(name=name, version=version)
+def package_url(name):
+     return "https://github.com/%s" % name
 
-def package_local_path(url):
-     global PACKAGE_ROOT
+def package_user_path(url):
      path_part = urlparse(url).path.strip('/')
-     return os.path.join(PACKAGE_ROOT, path_part)
+     (user, _) = path_part.split('/')
+     return os.path.join(PACKAGE_ROOT, user)
 
-def save_package(local_path, data):
-     logger.info('Storing package to %s...', local_path)
-     base_path = os.path.dirname(local_path)
-     os.makedirs(base_path, mode=0o755, exist_ok=True)
-     with open(local_path, 'wb') as fp:
-          fp.write(data)
+def package_full_path(url):
+     path_part = urlparse(url).path.strip('/')
+     return os.path.join(PACKAGE_ROOT, path_part + '.git')
 
-def local_package_exists(local_path):
-     return os.path.exists(local_path) and \
-          os.path.isfile(local_path) and \
-          os.path.getsize(local_path) > 0
+def ensure_path_exists(path):
+     os.makedirs(path, mode=0o755, exist_ok=True)
 
-def fetch_package(name, version):
-     logger.info('Fetching package %s v%s...', name, version)
-     url = package_url(name, version)
-     local_path = package_local_path(url)
-     if local_package_exists(local_path):
-          logger.info('Package %s v%s already downloaded!', name, version)
+def valid_package_url(url, session=setup_session()):
+     r = session.head(url)
+     if r.status_code == 200:
+          return True
      else:
-          save_package(local_path, session.get(url).content)
+          logger.warn('%s returned %s', url, r.status_code)
+          return False
 
-def get_all_package_versions(session = setup_session()):
+def mirror_package(name, no_update=False, session=setup_session()):
+     logger.info('Mirroring package %s...', name)
+     url = package_url(name)
+     user_path = package_user_path(url)
+     full_path = package_full_path(url)
+
+     if os.path.exists(full_path):
+          if no_update or not valid_package_url(url):
+               return
+          logger.debug('Package %s exists, trying to fetch additional refs', name)
+          ensure_path_exists(user_path)
+          subprocess.run(['/usr/bin/git', '--git-dir=' + full_path,
+                          'fetch', '--quiet', '-p', 'origin'],
+                         check=True)
+     elif valid_package_url(url):
+          logger.debug('Initial mirror of package %s', name)
+          ensure_path_exists(user_path)
+          subprocess.run(['/usr/bin/git', 'clone', '--quiet',
+                          '--mirror', url, full_path],
+                         check=True)
+
+def get_package_index(session = setup_session()):
      """Return a list of all (name, version) tuples
 from the Elm package index."""
      logger.info('Fetching package index...')
-     data = session.get(BASE_URL + "all-packages").json()
-     return [ (pkg.get('name'), version)
-              for pkg in data
-              for version in reversed(sorted(pkg.get('versions', []))) ]
+     data = session.get(BASE_URL + "all-packages").text
+     with open(os.path.join(PACKAGE_ROOT, 'all-packages'), 'w') as out:
+          out.write(data)
+     return json.loads(data)
 
 def setup():
      parser = argparse.ArgumentParser()
      parser.add_argument('-d', '--destination-directory',
                          help='Destination directory for downloaded files.',
                          default=PACKAGE_ROOT)
+     parser.add_argument('-i', '--override-index',
+                         help='Override index from specified file. (For debugging.)')
      parser.add_argument('-b', '--base-url',
                          help='Elm packages base URL.',
                          default=BASE_URL)
+     parser.add_argument('-n', '--no-update',
+                         help="Don't update packages we have. (For testing.)",
+                         action='store_true')
      parser.add_argument('-v', '--verbose',
                          help='Enable verbose output.',
                          action='store_true')
@@ -95,8 +114,14 @@ def setup():
 def main():
      args = setup()
 
-     (n, v) = get_all_package_versions()[0]
-     fetch_package(n, v)
+     if args.override_index:
+          with open(args.override_index, 'r') as fp:
+               packages = json.load(fp)
+     else:
+          packages = get_package_index()
+
+     for package in packages:
+          mirror_package(package.get('name'), args.no_update)
 
 if __name__ == "__main__":
     main()
