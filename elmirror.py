@@ -43,7 +43,7 @@ def ensure_path_exists(path):
 
 def valid_package_url(url, session=setup_session()):
      r = session.head(url)
-     if r.status_code == 200:
+     if r.status_code in (200, 301):
           return True
      else:
           logger.warn('%s returned %s', url, r.status_code)
