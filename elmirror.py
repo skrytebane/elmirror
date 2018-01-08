@@ -88,8 +88,8 @@ we need to update this repository."""
 
 def valid_git_repo(git_dir):
      try:
-          tags = get_git_tags(git_dir)
-          return len(tags) > 0
+          run_git('--git-dir=' + git_dir, 'log', '-1')
+          return True
      except:
           return False
 
