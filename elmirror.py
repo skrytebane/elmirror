@@ -69,6 +69,9 @@ def run_git(*arguments):
               in proc.stdout.decode('UTF-8').strip().split('\n')
               if line ]
 
+def get_git_tags(git_dir):
+     return run_git('--git-dir=' + git_dir, 'tag', '-l')
+
 def has_complete_mirror(package):
      """Return True if there are versions we don't have local tags for. I.e. if
 we need to update this repository."""
@@ -76,7 +79,7 @@ we need to update this repository."""
      versions = set(package.get('versions', []))
      git_dir = package_git_dir(package_url(name))
 
-     tags = run_git('--git-dir=' + git_dir, 'tag', '-l')
+     tags = get_git_tags(git_dir)
 
      if not tags:
           return False
@@ -85,7 +88,7 @@ we need to update this repository."""
 
 def valid_git_repo(git_dir):
      try:
-          tags = run_git('--git-dir=' + git_dir, 'tag', '-l')
+          tags = get_git_tags(git_dir)
           return len(tags) > 0
      except:
           return False
@@ -119,19 +122,20 @@ def mirror_package(package, no_update=False, session=setup_session()):
 
 def create_zipballs(package):
      full_name = package['name']
-     tags = package.get('versions', [])
      git_dir = package_git_dir(package_url(full_name))
+     tags = set(get_git_tags(git_dir))
+     versions = set(package.get('versions', [])).intersection(tags)
      destination_dir = os.path.join(git_dir, "zipball")
      ensure_path_exists(destination_dir)
-     for tag in tags:
-          destination = os.path.join(destination_dir, tag)
+     for version in versions:
+          destination = os.path.join(destination_dir, version)
           if os.path.exists(destination):
                continue
           describe_id = run_git('--git-dir=' + git_dir,
-                                'describe', '--always', tag)[0]
+                                'describe', '--always', version)[0]
           prefix = full_name.replace('/', '-') + '-' + describe_id + '/'
           run_git('--git-dir=' + git_dir, 'archive', '--prefix=' + prefix,
-                  '--output=' + destination, '--format=zip', tag)
+                  '--output=' + destination, '--format=zip', version)
 
 def get_package_index(session = setup_session()):
      "Return the Elm package index and also store it in PACKAGE_ROOT."
