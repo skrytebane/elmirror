@@ -34,7 +34,7 @@ def package_user_path(url):
      (user, _) = path_part.split('/')
      return os.path.join(PACKAGE_ROOT, user)
 
-def package_full_path(url):
+def package_git_dir(url):
      path_part = urlparse(url).path.strip('/')
      return os.path.join(PACKAGE_ROOT, path_part)
 
@@ -49,22 +49,40 @@ def valid_package_url(url, session=setup_session()):
           logger.warn('%s returned %s', url, r.status_code)
           return False
 
-def mirror_package(name, no_update=False, session=setup_session()):
+def has_complete_mirror(package):
+     """Return True if there are versions we don't have local tags for. I.e. if
+we need to update this repository."""
+     name = package['name']
+     versions = set(package.get('versions', []))
+     process = subprocess.run(['/usr/bin/git',
+                               '--git-dir=' + package_git_dir(package_url(name)),
+                               'tag', '-l'],
+                              check=True,
+                              stdout=subprocess.PIPE)
+     tags = { s for s in process.stdout.decode('UTF-8').split('\n') if s }
+     missing_versions = versions - tags
+     return not missing_versions
+
+def mirror_package(package, no_update=False, session=setup_session()):
+     name = package['name']
+
      logger.info('Mirroring package %s...', name)
      url = package_url(name)
      user_path = package_user_path(url)
-     full_path = package_full_path(url)
+     full_path = package_git_dir(url)
 
      if os.path.exists(full_path):
-          if no_update or not valid_package_url(url):
+          if no_update or \
+             has_complete_mirror(package) or \
+             not valid_package_url(url):
                return
-          logger.debug('Package %s exists, trying to fetch additional refs', name)
+          logger.debug('Package %s exists, looking for new versions...', name)
           ensure_path_exists(user_path)
           subprocess.run(['/usr/bin/git', '--git-dir=' + full_path,
                           'fetch', '--quiet', '-p', 'origin'],
                          check=True)
      elif valid_package_url(url):
-          logger.debug('Initial mirror of package %s', name)
+          logger.debug('Initial mirror of package %s...', name)
           ensure_path_exists(user_path)
           subprocess.run(['/usr/bin/git', 'clone', '--quiet',
                           '--mirror', url, full_path],
@@ -121,7 +139,7 @@ def main():
           packages = get_package_index()
 
      for package in packages:
-          mirror_package(package.get('name'), args.no_update)
+          mirror_package(package, args.no_update)
 
 if __name__ == "__main__":
     main()
