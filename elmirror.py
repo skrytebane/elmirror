@@ -83,21 +83,45 @@ def mirror_package(package, no_update=False, session=setup_session()):
      user_path = package_user_path(url)
      full_path = package_git_dir(url)
 
+     # TODO: Needs to be more robust. What to do in case of incomplete
+     #       Git-repositories? rm -rf and clone?
+
      if os.path.exists(full_path):
           if no_update or \
              has_complete_mirror(package) or \
              not valid_package_url(url):
                return
           logger.debug('Package %s exists, looking for new versions...', name)
-          ensure_path_exists(user_path)
           subprocess.run(['/usr/bin/git', '--git-dir=' + full_path,
                           'fetch', '--quiet', '-p', 'origin'],
                          check=True)
+          create_zipballs(package)
      elif valid_package_url(url):
           logger.debug('Initial mirror of package %s...', name)
           ensure_path_exists(user_path)
           subprocess.run(['/usr/bin/git', 'clone', '--quiet',
                           '--mirror', url, full_path],
+                         check=True)
+          create_zipballs(package)
+
+def create_zipballs(package):
+     full_name = package['name']
+     tags = package.get('versions', [])
+     git_dir = package_git_dir(package_url(full_name))
+     destination_dir = os.path.join(git_dir, "zipball")
+     ensure_path_exists(destination_dir)
+     for tag in tags:
+          destination = os.path.join(destination_dir, tag)
+          if os.path.exists(destination):
+               continue
+          process = subprocess.run(["/usr/bin/git", "--git-dir=" + git_dir,
+                                    "describe", "--always", tag],
+                                   check=True, stdout=subprocess.PIPE)
+          describe_id = process.stdout.decode('UTF-8').strip()
+          prefix = full_name.replace('/', '-') + '-' + describe_id + '/'
+          subprocess.run(["/usr/bin/git", "--git-dir=" + git_dir,
+                          "archive", "--prefix=" + prefix, "--output=" + destination,
+                          "--format=zip", tag],
                          check=True)
 
 def get_package_index(session = setup_session()):
