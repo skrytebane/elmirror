@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
-import logging, requests, os, sys, argparse, json, subprocess
+import logging, requests, os, sys, argparse, json
+import re, subprocess
 from urllib.parse import urlparse
 from requests.packages.urllib3.util import Retry
 from requests import exceptions
@@ -49,6 +50,15 @@ def valid_package_url(url, session=setup_session()):
           logger.warn('%s returned %s', url, r.status_code)
           return False
 
+def parse_semver(s):
+     m = re.match('^(\d+)\.(\d+)\.(\d+)$', s)
+     return tuple(map(int, m.groups())) if m else None
+
+def max_version(versions):
+     return max({ v for v
+                  in map(parse_semver, versions)
+                  if v })
+
 def has_complete_mirror(package):
      """Return True if there are versions we don't have local tags for. I.e. if
 we need to update this repository."""
@@ -60,8 +70,10 @@ we need to update this repository."""
                               check=True,
                               stdout=subprocess.PIPE)
      tags = { s for s in process.stdout.decode('UTF-8').split('\n') if s }
-     missing_versions = versions - tags
-     return not missing_versions
+     if not tags:
+          return False
+     else:
+          return max_version(tags) >= max_version(versions)
 
 def mirror_package(package, no_update=False, session=setup_session()):
      name = package['name']
