@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import logging, requests, os, sys, argparse, json
-import re, subprocess
+import re, subprocess, shutil
 from urllib.parse import urlparse
 from requests.packages.urllib3.util import Retry
 from requests import exceptions
@@ -59,21 +59,36 @@ def max_version(versions):
                   in map(parse_semver, versions)
                   if v })
 
+def run_git(*arguments):
+     proc = subprocess.run(['/usr/bin/git'] + list(arguments),
+                           check=True,
+                           stderr=subprocess.PIPE,
+                           stdout=subprocess.PIPE)
+     return [ line
+              for line
+              in proc.stdout.decode('UTF-8').strip().split('\n')
+              if line ]
+
 def has_complete_mirror(package):
      """Return True if there are versions we don't have local tags for. I.e. if
 we need to update this repository."""
      name = package['name']
      versions = set(package.get('versions', []))
-     process = subprocess.run(['/usr/bin/git',
-                               '--git-dir=' + package_git_dir(package_url(name)),
-                               'tag', '-l'],
-                              check=True,
-                              stdout=subprocess.PIPE)
-     tags = { s for s in process.stdout.decode('UTF-8').split('\n') if s }
+     git_dir = package_git_dir(package_url(name))
+
+     tags = run_git('--git-dir=' + git_dir, 'tag', '-l')
+
      if not tags:
           return False
      else:
           return max_version(tags) >= max_version(versions)
+
+def valid_git_repo(git_dir):
+     try:
+          tags = run_git('--git-dir=' + git_dir, 'tag', '-l')
+          return len(tags) > 0
+     except:
+          return False
 
 def mirror_package(package, no_update=False, session=setup_session()):
      name = package['name']
@@ -81,27 +96,25 @@ def mirror_package(package, no_update=False, session=setup_session()):
      logger.info('Mirroring package %s...', name)
      url = package_url(name)
      user_path = package_user_path(url)
-     full_path = package_git_dir(url)
+     git_dir = package_git_dir(url)
 
-     # TODO: Needs to be more robust. What to do in case of incomplete
-     #       Git-repositories? rm -rf and clone?
-
-     if os.path.exists(full_path):
-          if no_update or \
-             has_complete_mirror(package) or \
-             not valid_package_url(url):
-               return
-          logger.debug('Package %s exists, looking for new versions...', name)
-          subprocess.run(['/usr/bin/git', '--git-dir=' + full_path,
-                          'fetch', '--quiet', '-p', 'origin'],
-                         check=True)
+     if os.path.exists(git_dir):
+          if valid_git_repo(git_dir):
+               if no_update or \
+                  has_complete_mirror(package) or \
+                  not valid_package_url(url):
+                    return
+               logger.debug('Package %s exists, looking for new versions...', name)
+               run_git('--git-dir=' + git_dir, 'fetch', '--quiet', '-p', 'origin')
+          else:
+               logger.warn('Invalid git repo in %s. Removing and trying again...', git_dir)
+               shutil.rmtree(git_dir)
+               run_git('clone', '--quiet', '--mirror', url, git_dir)
           create_zipballs(package)
      elif valid_package_url(url):
           logger.debug('Initial mirror of package %s...', name)
           ensure_path_exists(user_path)
-          subprocess.run(['/usr/bin/git', 'clone', '--quiet',
-                          '--mirror', url, full_path],
-                         check=True)
+          run_git('clone', '--quiet', '--mirror', url, git_dir)
           create_zipballs(package)
 
 def create_zipballs(package):
@@ -114,15 +127,11 @@ def create_zipballs(package):
           destination = os.path.join(destination_dir, tag)
           if os.path.exists(destination):
                continue
-          process = subprocess.run(["/usr/bin/git", "--git-dir=" + git_dir,
-                                    "describe", "--always", tag],
-                                   check=True, stdout=subprocess.PIPE)
-          describe_id = process.stdout.decode('UTF-8').strip()
+          describe_id = run_git('--git-dir=' + git_dir,
+                                'describe', '--always', tag)[0]
           prefix = full_name.replace('/', '-') + '-' + describe_id + '/'
-          subprocess.run(["/usr/bin/git", "--git-dir=" + git_dir,
-                          "archive", "--prefix=" + prefix, "--output=" + destination,
-                          "--format=zip", tag],
-                         check=True)
+          run_git('--git-dir=' + git_dir, 'archive', '--prefix=' + prefix,
+                  '--output=' + destination, '--format=zip', tag)
 
 def get_package_index(session = setup_session()):
      "Return the Elm package index and also store it in PACKAGE_ROOT."
