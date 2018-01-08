@@ -74,6 +74,7 @@ def get_package_index(session = setup_session()):
      "Return the Elm package index and also store it in PACKAGE_ROOT."
      logger.info('Fetching package index...')
      data = session.get(BASE_URL + "all-packages").text
+     ensure_path_exists(PACKAGE_ROOT)
      with open(os.path.join(PACKAGE_ROOT, 'all-packages'), 'w') as out:
           out.write(data)
      return json.loads(data)
