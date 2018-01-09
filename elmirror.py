@@ -103,17 +103,16 @@ def mirror_package(package, no_update=False, session=setup_session()):
 
      if os.path.exists(git_dir):
           if valid_git_repo(git_dir):
-               if no_update or \
-                  has_complete_mirror(package) or \
-                  not valid_package_url(url):
-                    return
-               logger.debug('Package %s exists, looking for new versions...', name)
-               run_git('--git-dir=' + git_dir, 'fetch', '--quiet', '-p', 'origin')
+               if no_update or has_complete_mirror(package):
+                    create_zipballs(package)
+               elif valid_package_url(url):
+                    logger.debug('Package %s exists, looking for new versions...', name)
+                    run_git('--git-dir=' + git_dir, 'fetch', '--quiet', '-p', 'origin')
           else:
                logger.warn('Invalid git repo in %s. Removing and trying again...', git_dir)
                shutil.rmtree(git_dir)
                run_git('clone', '--quiet', '--mirror', url, git_dir)
-          create_zipballs(package)
+               create_zipballs(package)
      elif valid_package_url(url):
           logger.debug('Initial mirror of package %s...', name)
           ensure_path_exists(user_path)
