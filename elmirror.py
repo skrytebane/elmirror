@@ -7,7 +7,7 @@ from requests.packages.urllib3.util import Retry
 from requests import exceptions
 from requests.adapters import HTTPAdapter
 
-BASE_URL="http://package.elm-lang.org/"
+PACKAGE_URL="http://package.elm-lang.org/all-packages"
 PACKAGE_ROOT="/var/tmp/elmirror/"
 
 REPO_EXPR=re.compile(r"""
@@ -38,14 +38,13 @@ def setup_session():
 def package_url(name):
      return "https://github.com/%s" % name
 
-def package_user_path(url):
-     path_part = urlparse(url).path.strip('/')
-     (user, _) = path_part.split('/')
+def package_user_path(name):
+     (user, _) = name.split('/')
      return os.path.join(PACKAGE_ROOT, user)
 
-def package_git_dir(url):
-     path_part = urlparse(url).path.strip('/')
-     return os.path.join(PACKAGE_ROOT, path_part)
+def package_git_dir(package):
+     (user, repo) = package['name'].split('/')
+     return os.path.join(PACKAGE_ROOT, user, repo)
 
 def is_valid_repo_name(name):
      return REPO_EXPR.match(name)
@@ -62,7 +61,7 @@ def is_package_url_available(url, session=setup_session()):
           return False
 
 def parse_semver(s):
-     m = re.match('^(\d+)\.(\d+)\.(\d+)$', s)
+     m = re.match(r'^(\d+)\.(\d+)\.(\d+)$', s)
      return tuple(map(int, m.groups())) if m else None
 
 def max_version(versions):
@@ -86,61 +85,8 @@ def get_git_tags(git_dir):
 def git_update_server_info(git_dir):
      return run_git('--git-dir=' + git_dir, 'update-server-info')
 
-def has_complete_mirror(package):
-     """Return True if there are versions we don't have local tags for. I.e. if
-we need to update this repository."""
-     name = package['name']
-     versions = set(package.get('versions', []))
-     git_dir = package_git_dir(package_url(name))
-
-     tags = get_git_tags(git_dir)
-
-     if not tags:
-          return False
-     else:
-          return max_version(tags) >= max_version(versions)
-
-def valid_git_repo(git_dir):
-     try:
-          run_git('--git-dir=' + git_dir, 'log', '-1')
-          return True
-     except:
-          return False
-
-def mirror_package(package, no_update=False, session=setup_session()):
-     name = package['name']
-
-     logger.info('Mirroring package %s...', name)
-     url = package_url(name)
-     user_path = package_user_path(url)
-     git_dir = package_git_dir(url)
-
-     if os.path.exists(git_dir):
-          if valid_git_repo(git_dir):
-               if no_update or has_complete_mirror(package):
-                    create_zipballs(package)
-                    git_update_server_info(git_dir)
-               elif is_package_url_available(url):
-                    logger.debug('Package %s exists, looking for new versions...', name)
-                    run_git('--git-dir=' + git_dir, 'fetch', '--quiet', '-p', 'origin')
-                    create_zipballs(package)
-                    git_update_server_info(git_dir)
-          else:
-               logger.warn('Invalid git repo in %s. Removing and trying again...', git_dir)
-               shutil.rmtree(git_dir)
-               run_git('clone', '--quiet', '--mirror', url, git_dir)
-               create_zipballs(package)
-               git_update_server_info(git_dir)
-     elif is_package_url_available(url):
-          logger.debug('Initial mirror of package %s...', name)
-          ensure_path_exists(user_path)
-          run_git('clone', '--quiet', '--mirror', url, git_dir)
-          create_zipballs(package)
-          git_update_server_info(git_dir)
-
 def create_zipballs(package):
-     full_name = package['name']
-     git_dir = package_git_dir(package_url(full_name))
+     git_dir = package_git_dir(package)
      tags = set(get_git_tags(git_dir))
      versions = set(package.get('versions', [])).intersection(tags)
      destination_dir = os.path.join(git_dir, "zipball")
@@ -151,20 +97,85 @@ def create_zipballs(package):
                continue
           describe_id = run_git('--git-dir=' + git_dir,
                                 'describe', '--always', version)[0]
-          prefix = full_name.replace('/', '-') + '-' + describe_id + '/'
+          prefix = package['name'].replace('/', '-') + '-' + describe_id + '/'
           run_git('--git-dir=' + git_dir, 'archive', '--prefix=' + prefix,
                   '--output=' + destination, '--format=zip', version)
 
-def get_package_index(session = setup_session()):
+def has_complete_mirror(package):
+     """Return True if the highest version number from the Git repo
+tags are higher than or equal to the highest version number from the
+package index."""
+     versions = set(package.get('versions', []))
+     git_dir = package_git_dir(package)
+
+     tags = get_git_tags(git_dir)
+
+     if not tags:
+          return False
+     else:
+          return max_version(tags) >= max_version(versions)
+
+def valid_git_repo(git_dir):
+     """Try to determine if what is at git_dir looks like a valid
+Git repo."""
+     try:
+          run_git('--git-dir=' + git_dir, 'log', '-1')
+          return True
+     except:
+          return False
+
+def update_package(package):
+     name = package['name']
+     url = package_url(name)
+     git_dir = package_git_dir(package)
+
+     if valid_git_repo(git_dir):
+          if has_complete_mirror(package):
+               logger.debug('Package %s is not in need of an update', name)
+               return
+          logger.info('Updating package %s...', name)
+          if is_package_url_available(url):
+               logger.debug('Package %s exists, looking for new versions...', name)
+               run_git('--git-dir=' + git_dir, 'fetch', '--quiet', '-p', 'origin')
+     else:
+          logger.warn('Invalid git repo in %s. Removing and trying again...', git_dir)
+          shutil.rmtree(git_dir)
+          run_git('clone', '--quiet', '--mirror', url, git_dir)
+
+def clone_package(package):
+     name = package['name']
+     url = package_url(name)
+     git_dir = package_git_dir(package)
+
+     if is_package_url_available(url):
+          logger.debug('Initial mirror of package %s...', name)
+          ensure_path_exists(package_user_path(name))
+          run_git('clone', '--quiet', '--mirror', url, git_dir)
+
+def mirror_package(package, session=setup_session()):
+     git_dir = package_git_dir(package)
+
+     if os.path.exists(git_dir):
+          update_package(package)
+     else:
+          clone_package(package)
+
+     if valid_git_repo(git_dir):
+          create_zipballs(package)
+          git_update_server_info(git_dir)
+
+def get_package_index(url, session = setup_session()):
      "Return the Elm package index and also store it in PACKAGE_ROOT."
      logger.info('Fetching package index...')
-     data = session.get(BASE_URL + "all-packages").text
+     data = session.get(url).text
      ensure_path_exists(PACKAGE_ROOT)
      with open(os.path.join(PACKAGE_ROOT, 'all-packages'), 'w') as out:
           out.write(data)
      return json.loads(data)
 
 def setup():
+     global PACKAGE_ROOT
+
      parser = argparse.ArgumentParser()
      parser.add_argument('-d', '--destination-directory',
                          help='Destination directory for downloaded files.',
@@ -173,10 +184,7 @@ def setup():
                          help='Override index from specified file. (For debugging.)')
      parser.add_argument('-b', '--base-url',
                          help='Elm packages base URL.',
-                         default=BASE_URL)
-     parser.add_argument('-n', '--no-update',
-                         help="Don't update packages we have. (For testing.)",
-                         action='store_true')
+                         default=PACKAGE_URL)
      parser.add_argument('-v', '--verbose',
                          help='Enable verbose output.',
                          action='store_true')
@@ -185,6 +193,8 @@ def setup():
                          action='store_true')
 
      args = parser.parse_args()
+
+     PACKAGE_ROOT=args.destination_directory
 
      level = logging.ERROR if args.quiet else \
              (logging.DEBUG if args.verbose else logging.INFO)
@@ -203,13 +213,13 @@ def main():
           with open(args.override_index, 'r') as fp:
                packages = json.load(fp)
      else:
-          packages = get_package_index()
+          packages = get_package_index(args.base_url)
 
      for package in packages:
           # Just making sure the package names don't contain anything funny,
           # so we don't end up doing shutil.rmtree("foo/..") or similar.
           if is_valid_repo_name(package['name']):
-               mirror_package(package, args.no_update)
+               mirror_package(package)
           else:
                logger.warn('"%s" is not a valid package name, ignoring!', package['name'])
 
