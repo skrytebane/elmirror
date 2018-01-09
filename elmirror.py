@@ -10,8 +10,16 @@ from requests.adapters import HTTPAdapter
 BASE_URL="http://package.elm-lang.org/"
 PACKAGE_ROOT="/var/tmp/elmirror/"
 
+REPO_EXPR=re.compile(r"""
+^
+  ([a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9])  # User name
+/
+  ([a-zA-Z0-9_-][a-zA-Z0-9_.-]*)         # Repo path
+$
+""", re.VERBOSE)
+
 logger = logging.getLogger(__name__)
-session = None # Initialize per worker.
+session = None
 
 def setup_session():
      global session
@@ -38,6 +46,9 @@ def package_user_path(url):
 def package_git_dir(url):
      path_part = urlparse(url).path.strip('/')
      return os.path.join(PACKAGE_ROOT, path_part)
+
+def is_valid_repo_name(name):
+     return REPO_EXPR.match(name)
 
 def ensure_path_exists(path):
      os.makedirs(path, mode=0o755, exist_ok=True)
@@ -195,7 +206,12 @@ def main():
           packages = get_package_index()
 
      for package in packages:
-          mirror_package(package, args.no_update)
+          # Just making sure the package names don't contain anything funny,
+          # so we don't end up doing shutil.rmtree("foo/..") or similar.
+          if is_valid_repo_name(package['name']):
+               mirror_package(package, args.no_update)
+          else:
+               logger.warn('"%s" is not a valid package name, ignoring!', package['name'])
 
 if __name__ == "__main__":
     main()
