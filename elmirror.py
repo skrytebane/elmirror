@@ -70,7 +70,7 @@ def max_version(versions):
                   if v })
 
 def run_git(*arguments):
-     proc = subprocess.run(['/usr/bin/git'] + list(arguments),
+     proc = subprocess.run(['git'] + list(arguments),
                            check=True,
                            stderr=subprocess.PIPE,
                            stdout=subprocess.PIPE)
