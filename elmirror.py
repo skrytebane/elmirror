@@ -42,7 +42,7 @@ def package_git_dir(url):
 def ensure_path_exists(path):
      os.makedirs(path, mode=0o755, exist_ok=True)
 
-def valid_package_url(url, session=setup_session()):
+def is_package_url_available(url, session=setup_session()):
      r = session.head(url)
      if r.status_code in (200, 301):
           return True
@@ -71,6 +71,9 @@ def run_git(*arguments):
 
 def get_git_tags(git_dir):
      return run_git('--git-dir=' + git_dir, 'tag', '-l')
+
+def git_update_server_info(git_dir):
+     return run_git('--git-dir=' + git_dir, 'update-server-info')
 
 def has_complete_mirror(package):
      """Return True if there are versions we don't have local tags for. I.e. if
@@ -105,19 +108,24 @@ def mirror_package(package, no_update=False, session=setup_session()):
           if valid_git_repo(git_dir):
                if no_update or has_complete_mirror(package):
                     create_zipballs(package)
-               elif valid_package_url(url):
+                    git_update_server_info(git_dir)
+               elif is_package_url_available(url):
                     logger.debug('Package %s exists, looking for new versions...', name)
                     run_git('--git-dir=' + git_dir, 'fetch', '--quiet', '-p', 'origin')
+                    create_zipballs(package)
+                    git_update_server_info(git_dir)
           else:
                logger.warn('Invalid git repo in %s. Removing and trying again...', git_dir)
                shutil.rmtree(git_dir)
                run_git('clone', '--quiet', '--mirror', url, git_dir)
                create_zipballs(package)
-     elif valid_package_url(url):
+               git_update_server_info(git_dir)
+     elif is_package_url_available(url):
           logger.debug('Initial mirror of package %s...', name)
           ensure_path_exists(user_path)
           run_git('clone', '--quiet', '--mirror', url, git_dir)
           create_zipballs(package)
+          git_update_server_info(git_dir)
 
 def create_zipballs(package):
      full_name = package['name']
