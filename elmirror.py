@@ -219,7 +219,10 @@ def main():
           # Just making sure the package names don't contain anything funny,
           # so we don't end up doing shutil.rmtree("foo/..") or similar.
           if is_valid_repo_name(package['name']):
-               mirror_package(package)
+               try:
+                    mirror_package(package)
+               except Exception as e:
+                    logger.error('Error mirroring %s: %s', package['name'], e)
           else:
                logger.warn('"%s" is not a valid package name, ignoring!', package['name'])
 
