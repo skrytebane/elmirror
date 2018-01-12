@@ -7,7 +7,7 @@ from requests.packages.urllib3.util import Retry
 from requests import exceptions
 from requests.adapters import HTTPAdapter
 
-PACKAGE_URL="http://package.elm-lang.org/all-packages"
+PACKAGE_INDEX_URL="http://package.elm-lang.org/all-packages"
 PACKAGE_ROOT="/var/tmp/elmirror/"
 
 REPO_EXPR=re.compile(r"""
@@ -154,8 +154,13 @@ def clone_package(package):
 
 def mirror_package(package, session=setup_session()):
      git_dir = package_git_dir(package)
+     name = package['name']
 
-     if os.path.exists(git_dir):
+     # Just making sure the package names don't contain anything funny,
+     # so we don't end up doing shutil.rmtree("foo/..") or similar.
+     if not is_valid_repo_name(name):
+          logger.warn('"%s" is not a valid package name, ignoring!', name)
+     elif os.path.exists(git_dir):
           update_package(package)
      else:
           clone_package(package)
@@ -178,13 +183,15 @@ def setup():
 
      parser = argparse.ArgumentParser()
      parser.add_argument('-d', '--destination-directory',
-                         help='Destination directory for downloaded files.',
+                         help="""Destination directory for downloaded files.
+Defaults to "%s".""" % PACKAGE_ROOT,
                          default=PACKAGE_ROOT)
      parser.add_argument('-i', '--override-index',
-                         help='Override index from specified file. (For debugging.)')
-     parser.add_argument('-b', '--base-url',
-                         help='Elm packages base URL.',
-                         default=PACKAGE_URL)
+                         help='Override index from specified local file. (For debugging.)')
+     parser.add_argument('-p', '--package-index-url',
+                         help="""Elm package index base URL.
+Defaults to "%s".""" % PACKAGE_INDEX_URL,
+                         default=PACKAGE_INDEX_URL)
      parser.add_argument('-v', '--verbose',
                          help='Enable verbose output.',
                          action='store_true')
@@ -213,18 +220,13 @@ def main():
           with open(args.override_index, 'r') as fp:
                packages = json.load(fp)
      else:
-          packages = get_package_index(args.base_url)
+          packages = get_package_index(args.package_index_url)
 
      for package in packages:
-          # Just making sure the package names don't contain anything funny,
-          # so we don't end up doing shutil.rmtree("foo/..") or similar.
-          if is_valid_repo_name(package['name']):
-               try:
-                    mirror_package(package)
-               except Exception as e:
-                    logger.error('Error mirroring %s: %s', package['name'], e)
-          else:
-               logger.warn('"%s" is not a valid package name, ignoring!', package['name'])
+          try:
+               mirror_package(package)
+          except Exception as e:
+               logger.error('Error mirroring %s: %s', package['name'], e)
 
 if __name__ == "__main__":
     main()
