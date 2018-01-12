@@ -152,7 +152,7 @@ def clone_package(package):
           ensure_path_exists(package_user_path(name))
           run_git('clone', '--quiet', '--mirror', url, git_dir)
 
-def mirror_package(package, session=setup_session()):
+def mirror_package(package):
      git_dir = package_git_dir(package)
      name = package['name']
 
