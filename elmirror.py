@@ -124,6 +124,17 @@ Git repo."""
      except:
           return False
 
+def careful_rmtree(path):
+     path = path.rstrip('/')
+     abspath = os.path.abspath(path)
+     common_prefix = os.path.commonprefix([abspath, PACKAGE_ROOT])
+
+     if os.path.isdir(path) and path == abspath and common_prefix == PACKAGE_ROOT:
+          logger.warn("Deleting '%s'", path)
+          shutil.rmtree(path)
+     else:
+          raise Exception("Something doesn't look right, not deleting '%s'" % path)
+
 def update_package(package):
      name = package['name']
      url = package_url(name)
@@ -139,7 +150,7 @@ def update_package(package):
                run_git('--git-dir=' + git_dir, 'fetch', '--quiet', '-p', 'origin')
      else:
           logger.warn('Invalid git repo in %s. Removing and trying again...', git_dir)
-          shutil.rmtree(git_dir)
+          careful_rmtree(git_dir)
           run_git('clone', '--quiet', '--mirror', url, git_dir)
 
 def clone_package(package):
