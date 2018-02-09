@@ -10,6 +10,7 @@ import json
 import re
 import subprocess
 import shutil
+import html
 import requests
 from requests.packages.urllib3.util import Retry
 from requests.adapters import HTTPAdapter
@@ -190,6 +191,38 @@ def get_package_index(url, session = setup_session()):
         out.write(data)
     return json.loads(data)
 
+def generate_index_html(packages):
+    def zipball_urls(package):
+        return ", ".join(['<a href="/{name}/zipball/{version}" download="{barename}-{version}.zip">{version}</a>'
+                          .format(name=package.get('name'),
+                                  barename=package.get('name').split('/')[1],
+                                  version=version)
+                          for version
+                          in package.get('versions', [])])
+
+    package_info = ["""<dl>
+<dt><strong>{name}</strong> (<a href="/{name}">Git</a>)</dt>
+<dd>
+{desc}
+<br>
+<strong>Releases:</strong> {zipballs}
+</dd>
+</dl>""".format(name=package.get('name'),
+                desc=html.escape(package.get('summary')),
+                zipballs=zipball_urls(package)) for package in packages]
+
+    return """<!doctype html>
+<html>
+<head>
+ <meta charset="UTF-8">
+ <title>Elm packages</title>
+</head>
+<body>
+  <h1>Elm package mirror</h1>
+  {body}
+</body>
+</html>""".format(body="\n".join(package_info))
+
 def setup():
     global PACKAGE_ROOT
 
@@ -233,6 +266,9 @@ def main():
             packages = json.load(package_file)
     else:
         packages = get_package_index(args.package_index_url)
+
+    with open(os.path.join(PACKAGE_ROOT, 'index.html'), 'w') as idx:
+        idx.write(generate_index_html(packages))
 
     for package in packages:
         try:
