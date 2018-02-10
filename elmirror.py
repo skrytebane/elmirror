@@ -72,36 +72,50 @@ def max_version(versions):
                 in map(parse_semver, versions)
                 if v})
 
-def run_git(*arguments):
-    proc = subprocess.run(['git'] + list(arguments),
+def raw_git(arguments):
+    return subprocess.run(['git'] + arguments,
                           check=True,
                           stderr=subprocess.PIPE,
                           stdout=subprocess.PIPE)
+
+def run_git_lines(*arguments):
     return [line for line
-            in proc.stdout.decode('UTF-8').strip().split('\n')
+            in raw_git(list(arguments)).stdout.decode('UTF-8').strip().split('\n')
             if line]
 
+def run_git_string(*arguments):
+    return raw_git(list(arguments)).stdout.decode('UTF-8').strip()
+
 def get_git_tags(git_dir):
-    return run_git('--git-dir=' + git_dir, 'tag', '-l')
+    return run_git_lines('--git-dir=' + git_dir, 'tag', '-l')
 
 def git_update_server_info(git_dir):
-    return run_git('--git-dir=' + git_dir, 'update-server-info')
+    return run_git_lines('--git-dir=' + git_dir, 'update-server-info')
 
-def create_zipballs(package):
+def create_zipballs_and_descriptions(package):
     git_dir = package_git_dir(package)
     tags = set(get_git_tags(git_dir))
     versions = set(package.get('versions', [])).intersection(tags)
-    destination_dir = os.path.join(git_dir, "zipball")
-    ensure_path_exists(destination_dir)
+
+    zipball_destination_dir = os.path.join(git_dir, "zipball")
+    ensure_path_exists(zipball_destination_dir)
+
+    description_destination_dir = os.path.join(git_dir, "descriptions")
+    ensure_path_exists(description_destination_dir)
+
     for version in versions:
-        destination = os.path.join(destination_dir, version)
-        if os.path.exists(destination):
-            continue
-        describe_id = run_git('--git-dir=' + git_dir,
-                              'describe', '--always', version)[0]
-        prefix = package['name'].replace('/', '-') + '-' + describe_id + '/'
-        run_git('--git-dir=' + git_dir, 'archive', '--prefix=' + prefix,
-                '--output=' + destination, '--format=zip', version)
+        zip_destination = os.path.join(zipball_destination_dir, version)
+        if not os.path.exists(zip_destination):
+            describe_id = run_git_string('--git-dir=' + git_dir,
+                                         'describe', '--always', version)
+            prefix = package['name'].replace('/', '-') + '-' + describe_id + '/'
+            run_git_string('--git-dir=' + git_dir, 'archive', '--prefix=' + prefix,
+                           '--output=' + zip_destination, '--format=zip', version)
+
+        desc_destination = os.path.join(description_destination_dir, version)
+        with open(desc_destination, 'w') as desc_file:
+            desc_file.write(
+                run_git_string('--git-dir=' + git_dir, 'show', version + ':elm-package.json'))
 
 def has_complete_mirror(package):
     """Return True if the highest version number from the Git repo
@@ -121,7 +135,7 @@ def valid_git_repo(git_dir):
     """Try to determine if what is at git_dir looks like a valid
 Git repo."""
     try:
-        run_git('--git-dir=' + git_dir, 'log', '-1')
+        run_git_string('--git-dir=' + git_dir, 'log', '-1')
         return True
     except subprocess.CalledProcessError:
         return False
@@ -149,11 +163,11 @@ def update_package(package):
         logger.info('Updating package %s...', name)
         if is_package_url_available(url):
             logger.debug('Package %s exists, looking for new versions...', name)
-            run_git('--git-dir=' + git_dir, 'fetch', '--quiet', '-p', 'origin')
+            run_git_string('--git-dir=' + git_dir, 'fetch', '--quiet', '-p', 'origin')
     else:
         logger.warning('Invalid git repo in %s. Removing and trying again...', git_dir)
         careful_rmtree(git_dir)
-        run_git('clone', '--quiet', '--mirror', url, git_dir)
+        run_git_string('clone', '--quiet', '--mirror', url, git_dir)
 
 def clone_package(package):
     name = package['name']
@@ -163,7 +177,7 @@ def clone_package(package):
     if is_package_url_available(url):
         logger.debug('Initial mirror of package %s...', name)
         ensure_path_exists(package_user_path(name))
-        run_git('clone', '--quiet', '--mirror', url, git_dir)
+        run_git_string('clone', '--quiet', '--mirror', url, git_dir)
 
 def mirror_package(package):
     git_dir = package_git_dir(package)
@@ -179,7 +193,7 @@ def mirror_package(package):
         clone_package(package)
 
     if valid_git_repo(git_dir):
-        create_zipballs(package)
+        create_zipballs_and_descriptions(package)
         git_update_server_info(git_dir)
 
 def get_package_index(url, session = setup_session()):
