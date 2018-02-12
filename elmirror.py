@@ -113,9 +113,12 @@ def create_zipballs_and_descriptions(package):
                            '--output=' + zip_destination, '--format=zip', version)
 
         desc_destination = os.path.join(description_destination_dir, version)
-        with open(desc_destination, 'w') as desc_file:
-            desc_file.write(
-                run_git_string('--git-dir=' + git_dir, 'show', version + ':elm-package.json'))
+        try:
+            description = run_git_string('--git-dir=' + git_dir, 'show', version + ':elm-package.json')
+            with open(desc_destination, 'w') as desc_file:
+                desc_file.write(description)
+        except subprocess.CalledProcessError:
+            logger.error('Unable to get elm-package.json for %s v%s', package.get('name'), version)
 
 def has_complete_mirror(package):
     """Return True if the highest version number from the Git repo
