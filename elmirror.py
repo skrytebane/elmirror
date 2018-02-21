@@ -210,7 +210,7 @@ def get_package_index(url, session = setup_session()):
 
 def generate_index_html(packages):
     def zipball_urls(package):
-        return ", ".join(['<a href="/{name}/zipball/{version}" download="{barename}-{version}.zip">{version}</a>'
+        return ", ".join(['<a href="{name}/zipball/{version}" download="{barename}-{version}.zip">{version}</a>'
                           .format(name=package.get('name'),
                                   barename=package.get('name').split('/')[1],
                                   version=version)
@@ -218,7 +218,7 @@ def generate_index_html(packages):
                           in package.get('versions', [])])
 
     package_info = ["""<dl>
-<dt><strong>{name}</strong> (<a href="/{name}">Git</a>)</dt>
+<dt><strong>{name}</strong> (<a href="{name}">Git</a>)</dt>
 <dd>
 {desc}
 <br>
