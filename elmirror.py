@@ -15,7 +15,7 @@ import requests
 from requests.packages.urllib3.util import Retry
 from requests.adapters import HTTPAdapter
 
-PACKAGE_INDEX_URL = "http://package.elm-lang.org/all-packages"
+PACKAGE_INDEX_URL = "https://package.elm-lang.org/all-packages"
 PACKAGE_ROOT = "/var/tmp/elmirror/"
 
 REPO_EXPR = re.compile(r"""
