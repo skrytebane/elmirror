@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 
-"Script for mirroring the Elm package repository."
+"""Script for mirroring the Elm package repository."""
 
-import logging
-import os
-import sys
 import argparse
 import json
+import logging
+import os
 import re
-import subprocess
 import shutil
-import html
+import subprocess
+import sys
+
 import requests
-from requests.packages.urllib3.util import Retry
 from requests.adapters import HTTPAdapter
+# noinspection PyUnresolvedReferences
+from requests.packages.urllib3.util import Retry
 
 PACKAGE_INDEX_URL = "https://package.elm-lang.org/all-packages"
 PACKAGE_ROOT = "/var/tmp/elmirror/"
@@ -28,6 +29,7 @@ $
 
 logger = logging.getLogger(__name__)
 
+
 def setup_session():
     logger.debug('Creating new requests session')
     session = requests.Session()
@@ -38,22 +40,28 @@ def setup_session():
     session.mount('https://', HTTPAdapter(max_retries=retry_strategy))
     return session
 
+
 def package_url(name):
     return "https://github.com/%s" % name
+
 
 def package_user_path(name):
     (user, _) = name.split('/')
     return os.path.join(PACKAGE_ROOT, user)
 
+
 def package_git_dir(package_name):
     (user, repo) = package_name.split('/')
     return os.path.join(PACKAGE_ROOT, user, repo)
 
+
 def is_valid_repo_name(name):
     return REPO_EXPR.match(name)
 
+
 def ensure_path_exists(path):
     os.makedirs(path, mode=0o755, exist_ok=True)
+
 
 def is_package_url_available(url, session=setup_session()):
     req = session.head(url)
@@ -63,14 +71,17 @@ def is_package_url_available(url, session=setup_session()):
     logger.warning('%s returned %s', url, req.status_code)
     return False
 
+
 def parse_semver(s):
     match = re.match(r'^(\d+)\.(\d+)\.(\d+)$', s)
     return tuple(map(int, match.groups())) if match else None
+
 
 def max_version(versions):
     return max({v for v
                 in map(parse_semver, versions)
                 if v})
+
 
 def raw_git(arguments):
     return subprocess.run(['git'] + arguments,
@@ -78,19 +89,24 @@ def raw_git(arguments):
                           stderr=subprocess.PIPE,
                           stdout=subprocess.PIPE)
 
+
 def run_git_lines(*arguments):
     return [line for line
             in raw_git(list(arguments)).stdout.decode('UTF-8').strip().split('\n')
             if line]
 
+
 def run_git_string(*arguments):
     return raw_git(list(arguments)).stdout.decode('UTF-8').strip()
+
 
 def get_git_tags(git_dir):
     return run_git_lines('--git-dir=' + git_dir, 'tag', '-l')
 
+
 def git_update_server_info(git_dir):
     return run_git_lines('--git-dir=' + git_dir, 'update-server-info')
+
 
 def create_zipballs_and_descriptions(package_name, package_versions):
     git_dir = package_git_dir(package_name)
@@ -120,6 +136,7 @@ def create_zipballs_and_descriptions(package_name, package_versions):
         except subprocess.CalledProcessError:
             logger.error('Unable to get elm-package.json for %s v%s', package_name, version)
 
+
 def has_complete_mirror(package_name, package_versions):
     """Return True if the highest version number from the Git repo
 tags are higher than or equal to the highest version number from the
@@ -134,6 +151,7 @@ package index."""
 
     return max_version(tags) >= max_version(versions)
 
+
 def valid_git_repo(git_dir):
     """Try to determine if what is at git_dir looks like a valid
 Git repo."""
@@ -142,6 +160,7 @@ Git repo."""
         return True
     except subprocess.CalledProcessError:
         return False
+
 
 def careful_rmtree(path):
     path = path.rstrip('/')
@@ -153,6 +172,7 @@ def careful_rmtree(path):
         shutil.rmtree(path)
     else:
         raise Exception("Something doesn't look right, not deleting '%s'" % path)
+
 
 def update_package(package_name, package_versions):
     url = package_url(package_name)
@@ -171,6 +191,7 @@ def update_package(package_name, package_versions):
         careful_rmtree(git_dir)
         run_git_string('clone', '--quiet', '--mirror', url, git_dir)
 
+
 def clone_package(package_name):
     url = package_url(package_name)
     git_dir = package_git_dir(package_name)
@@ -180,13 +201,14 @@ def clone_package(package_name):
         ensure_path_exists(package_user_path(package_name))
         run_git_string('clone', '--quiet', '--mirror', url, git_dir)
 
+
 def mirror_package(package_name, package_versions):
     git_dir = package_git_dir(package_name)
 
     # Just making sure the package names don't contain anything funny,
     # so we don't end up doing shutil.rmtree("foo/..") or similar.
     if not is_valid_repo_name(package_name):
-        logger.warning('"%s" is not a valid package name, ignoring!', name)
+        logger.warning('"%s" is not a valid package name, ignoring!', package_name)
     elif os.path.exists(git_dir):
         update_package(package_name, package_versions)
     else:
@@ -196,8 +218,9 @@ def mirror_package(package_name, package_versions):
         create_zipballs_and_descriptions(package_name, package_versions)
         git_update_server_info(git_dir)
 
-def get_package_index(url, session = setup_session()):
-    "Return the Elm package index and also store it in PACKAGE_ROOT."
+
+def get_package_index(url, session=setup_session()):
+    """Return the Elm package index and also store it in PACKAGE_ROOT."""
     logger.info('Fetching package index...')
     data = session.get(url).text
     ensure_path_exists(PACKAGE_ROOT)
@@ -205,12 +228,11 @@ def get_package_index(url, session = setup_session()):
         out.write(data)
     return json.loads(data)
 
+
 def generate_index_html(packages):
     def zipball_urls(package_name, versions):
-        return ", ".join(['<a href="{name}/zipball/{version}" download="{barename}-{version}.zip">{version}</a>'
-                          .format(name=package_name,
-                                  barename=package_name.split('/')[1],
-                                  version=version)
+        return ", ".join([f'<a href="{package_name}/zipball/{version}" '
+                          f'download="{package_name.split("/")[1]}-{version}.zip">{version}</a>'
                           for version
                           in versions])
 
@@ -222,10 +244,10 @@ def generate_index_html(packages):
 <strong>Releases:</strong> {zipballs}
 </dd>
 </dl>""".format(name=package_name,
-                desc="", # XXX: TODO:
+                desc="",  # XXX: TODO:
                 zipballs=zipball_urls(package_name, versions))
                     for (package_name, versions)
-                    in packages.items() ]
+                    in packages.items()]
 
     return """<!doctype html>
 <html>
@@ -238,6 +260,7 @@ def generate_index_html(packages):
   {body}
 </body>
 </html>""".format(body="\n".join(package_info))
+
 
 def setup():
     global PACKAGE_ROOT
@@ -265,7 +288,7 @@ Defaults to "%s".""" % PACKAGE_INDEX_URL,
     PACKAGE_ROOT = args.destination_directory
 
     level = logging.ERROR if args.quiet else \
-            (logging.DEBUG if args.verbose else logging.INFO)
+        (logging.DEBUG if args.verbose else logging.INFO)
 
     logging.basicConfig(
         stream=sys.stderr,
@@ -273,6 +296,7 @@ Defaults to "%s".""" % PACKAGE_INDEX_URL,
         format="%(asctime)s:%(levelname)s:%(module)s:%(funcName)s: %(message)s")
 
     return args
+
 
 def main():
     args = setup()
@@ -291,6 +315,7 @@ def main():
             mirror_package(package_name, package_versions)
         except Exception as error:
             logger.error('Error mirroring %s: %s', package_name, error)
+
 
 if __name__ == "__main__":
     main()
