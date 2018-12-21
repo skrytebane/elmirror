@@ -245,7 +245,7 @@ def get_package_index(url, session=setup_session()):
 
 
 def gather_downloaded_package_metadata():
-    metadata_files = glob.glob(os.path.join(PACKAGE_ROOT, "*", "*", "descriptions", "*"))
+    metadata_filenames = glob.glob(os.path.join(PACKAGE_ROOT, "*", "*", "descriptions", "*"))
 
     def read_metadata(filename):
         with open(filename) as f:
@@ -254,27 +254,30 @@ def gather_downloaded_package_metadata():
             except Exception as e:
                 logger.warning('Unable to parse "%s": %s', filename, e)
 
-    def valid_data(item):
-        return item and 'name' in item
+    def is_valid(item):
+        return item and \
+               isinstance(item, dict) and \
+               item.get('name', '').count('/') == 1
 
-    valid_data = filter(valid_data, map(read_metadata, metadata_files))
+    valid_data = filter(is_valid, map(read_metadata, metadata_filenames))
 
     return {project_name: list(versions)
             for (project_name, versions)
             in groupby(valid_data, key=operator.itemgetter('name'))}
 
 
-def generate_index_html(package_metadatas):
-    def zipball_urls(package_name, versions):
-        # FIXME: The package_name.split-thing can fail here, strangely.
-        return ", ".join([f'<a href="{package_name}/zipball/{version["version"]}" '
-                          f'download="{package_name.split("/")[1]}-{version["version"]}.zip">{version["version"]}</a>'
-                          for version
-                          in versions])
+def make_zipball_urls(package_name, versions):
+    return ", ".join([f'<a href="{package_name}/zipball/{version["version"]}" '
+                      f'download="{package_name.split("/")[1]}-{version["version"]}.zip">'
+                      f'{version["version"]}</a>'
+                      for version
+                      in versions])
 
+
+def generate_index_html(package_metadatas):
     package_info = [f"<dl><dt><strong>{package_name}</strong> (<a href=\"{package_name}\">Git</a>)</dt>"
                     f"<dd>{html.escape(versions[0]['summary'])}<br>"
-                    f"<strong>Releases:</strong> {zipball_urls(package_name, versions)}</dd></dl>"
+                    f"<strong>Releases:</strong> {make_zipball_urls(package_name, versions)}</dd></dl>"
                     for (package_name, versions)
                     in sorted(package_metadatas.items(), key=operator.itemgetter(0))]
 
