@@ -3,13 +3,17 @@
 """Script for mirroring the Elm package repository."""
 
 import argparse
+import glob
+import html
 import json
 import logging
+import operator
 import os
 import re
 import shutil
 import subprocess
 import sys
+from itertools import groupby
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -108,33 +112,55 @@ def git_update_server_info(git_dir):
     return run_git_lines('--git-dir=' + git_dir, 'update-server-info')
 
 
+RANGE_PATTERN = re.compile(r'^(?P<from>\d+\.\d+\.\d+)\s*'
+                           r'(?P<operator1><=)\s*'
+                           r'v\s*'
+                           r'(?P<operator2><)\s*'
+                           r'(?P<to>\d+\.\d+\.\d+)$')
+
+
+# This doesn't do complete version constraint parsing at all, just
+# a simple verification that
+def is_interesting_version(target_version, version_expr):
+    if version_expr:
+        match = RANGE_PATTERN.match(version_expr)
+        return match and match.group('from').startswith(target_version)
+
+
 def create_zipballs_and_descriptions(package_name, package_versions):
     git_dir = package_git_dir(package_name)
     tags = set(get_git_tags(git_dir))
     versions = set(package_versions).intersection(tags)
 
     zipball_destination_dir = os.path.join(git_dir, "zipball")
-    ensure_path_exists(zipball_destination_dir)
-
     description_destination_dir = os.path.join(git_dir, "descriptions")
-    ensure_path_exists(description_destination_dir)
 
     for version in versions:
-        zip_destination = os.path.join(zipball_destination_dir, version)
-        if not os.path.exists(zip_destination):
-            describe_id = run_git_string('--git-dir=' + git_dir,
-                                         'describe', '--always', version)
-            prefix = package_name.replace('/', '-') + '-' + describe_id + '/'
-            run_git_string('--git-dir=' + git_dir, 'archive', '--prefix=' + prefix,
-                           '--output=' + zip_destination, '--format=zip', version)
-
         desc_destination = os.path.join(description_destination_dir, version)
         try:
-            description = run_git_string('--git-dir=' + git_dir, 'show', version + ':elm-package.json')
+            raw_description = run_git_string('--git-dir=' + git_dir, 'show', version + ':elm.json')
+
+            description = json.loads(raw_description)
+            if not is_interesting_version("0.19", description.get('elm-version')):
+                logger.warning("Don't care about version %s", description.get('elm-version'))
+                continue
+
+            ensure_path_exists(description_destination_dir)
             with open(desc_destination, 'w') as desc_file:
-                desc_file.write(description)
+                desc_file.write(raw_description)
         except subprocess.CalledProcessError:
-            logger.error('Unable to get elm-package.json for %s v%s', package_name, version)
+            # Probably an old (pre-0.19) package version with elm-package.json instead:
+            logger.debug('Unable to get elm.json for %s v%s', package_name, version)
+            continue
+
+        ensure_path_exists(zipball_destination_dir)
+        zip_destination = os.path.join(zipball_destination_dir, version)
+        if not os.path.exists(zip_destination):
+            abbrev_ref_id = run_git_string('--git-dir=' + git_dir,
+                                           'show-ref', '--abbrev', '--hash', version)
+            prefix = package_name.replace('/', '-') + '-' + abbrev_ref_id + '/'
+            run_git_string('--git-dir=' + git_dir, 'archive', '--prefix=' + prefix,
+                           '--output=' + zip_destination, '--format=zip', version)
 
 
 def has_complete_mirror(package_name, package_versions):
@@ -223,43 +249,46 @@ def get_package_index(url, session=setup_session()):
     """Return the Elm package index and also store it in PACKAGE_ROOT."""
     logger.info('Fetching package index...')
     data = session.get(url).text
-    ensure_path_exists(PACKAGE_ROOT)
     with open(os.path.join(PACKAGE_ROOT, 'all-packages'), 'w') as out:
         out.write(data)
     return json.loads(data)
 
 
-def generate_index_html(packages):
+def gather_downloaded_package_metadata():
+    metadata_files = glob.glob(os.path.join(PACKAGE_ROOT, "*", "*", "descriptions", "*"))
+
+    def slurp_data(filename):
+        with open(filename) as f:
+            return json.load(f)
+
+    grouped = groupby((slurp_data(package_metadata)
+                       for package_metadata
+                       in metadata_files),
+                      key=operator.itemgetter('name'))
+
+    return {project_name: list(versions)
+            for (project_name, versions)
+            in grouped}
+
+
+def generate_index_html(package_metadatas):
     def zipball_urls(package_name, versions):
-        return ", ".join([f'<a href="{package_name}/zipball/{version}" '
-                          f'download="{package_name.split("/")[1]}-{version}.zip">{version}</a>'
+        return ", ".join([f'<a href="{package_name}/zipball/{version["version"]}" '
+                          f'download="{package_name.split("/")[1]}-{version["version"]}.zip">{version["version"]}</a>'
                           for version
                           in versions])
 
-    package_info = ["""<dl>
-<dt><strong>{name}</strong> (<a href="{name}">Git</a>)</dt>
-<dd>
-{desc}
-<br>
-<strong>Releases:</strong> {zipballs}
-</dd>
-</dl>""".format(name=package_name,
-                desc="",  # XXX: TODO:
-                zipballs=zipball_urls(package_name, versions))
+    package_info = [f"<dl><dt><strong>{package_name}</strong> (<a href=\"{package_name}\">Git</a>)</dt>"
+                    f"<dd>{html.escape(versions[0]['summary'])}<br>"
+                    f"<strong>Releases:</strong> {zipball_urls(package_name, versions)}</dd></dl>"
                     for (package_name, versions)
-                    in packages.items()]
+                    in package_metadatas.items()]
 
-    return """<!doctype html>
-<html>
-<head>
- <meta charset="UTF-8">
- <title>Elm packages</title>
-</head>
-<body>
-  <h1>Elm package mirror</h1>
-  {body}
-</body>
-</html>""".format(body="\n".join(package_info))
+    return '<!doctype html>\n' + \
+           '<html><head><meta charset="UTF-8"><title>Elm packages</title></head><body>' + \
+           '<h1>Elm package mirror</h1>\n' + \
+           '\n'.join(package_info) + \
+           "</body></html>"
 
 
 def setup():
@@ -307,14 +336,16 @@ def main():
     else:
         packages = get_package_index(args.package_index_url)
 
-    with open(os.path.join(PACKAGE_ROOT, 'index.html'), 'w') as idx:
-        idx.write(generate_index_html(packages))
-
     for (package_name, package_versions) in packages.items():
         try:
             mirror_package(package_name, package_versions)
         except Exception as error:
             logger.error('Error mirroring %s: %s', package_name, error)
+
+    ensure_path_exists(PACKAGE_ROOT)
+    package_metadatas = gather_downloaded_package_metadata()
+    with open(os.path.join(PACKAGE_ROOT, 'index.html'), 'w') as idx:
+        idx.write(generate_index_html(package_metadatas))
 
 
 if __name__ == "__main__":
