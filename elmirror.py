@@ -112,19 +112,8 @@ def git_update_server_info(git_dir):
     return run_git_lines('--git-dir=' + git_dir, 'update-server-info')
 
 
-RANGE_PATTERN = re.compile(r'^(?P<from>\d+\.\d+\.\d+)\s*'
-                           r'(?P<operator1><=)\s*'
-                           r'v\s*'
-                           r'(?P<operator2><)\s*'
-                           r'(?P<to>\d+\.\d+\.\d+)$')
-
-
-# This doesn't do complete version constraint parsing at all, just
-# a simple verification that
 def is_interesting_version(target_version, version_expr):
-    if version_expr:
-        match = RANGE_PATTERN.match(version_expr)
-        return match and match.group('from').startswith(target_version)
+    return target_version in version_expr
 
 
 def create_zipballs_and_descriptions(package_name, package_versions):
@@ -141,8 +130,9 @@ def create_zipballs_and_descriptions(package_name, package_versions):
             raw_description = run_git_string('--git-dir=' + git_dir, 'show', version + ':elm.json')
 
             description = json.loads(raw_description)
-            if not is_interesting_version("0.19", description.get('elm-version')):
-                logger.warning("Don't care about version %s", description.get('elm-version'))
+            if not is_interesting_version("0.19.", description.get('elm-version')):
+                logger.warning("Don't care about version %s of %s",
+                               description.get('elm-version'), package_name)
                 continue
 
             ensure_path_exists(description_destination_dir)
