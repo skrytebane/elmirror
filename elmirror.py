@@ -247,22 +247,26 @@ def get_package_index(url, session=setup_session()):
 def gather_downloaded_package_metadata():
     metadata_files = glob.glob(os.path.join(PACKAGE_ROOT, "*", "*", "descriptions", "*"))
 
-    def slurp_data(filename):
+    def read_metadata(filename):
         with open(filename) as f:
-            return json.load(f)
+            try:
+                return json.load(f)
+            except Exception as e:
+                logger.warning('Unable to parse "%s": %s', filename, e)
 
-    grouped = groupby((slurp_data(package_metadata)
-                       for package_metadata
-                       in metadata_files),
-                      key=operator.itemgetter('name'))
+    def valid_data(item):
+        return item and 'name' in item
+
+    valid_data = filter(valid_data, map(read_metadata, metadata_files))
 
     return {project_name: list(versions)
             for (project_name, versions)
-            in grouped}
+            in groupby(valid_data, key=operator.itemgetter('name'))}
 
 
 def generate_index_html(package_metadatas):
     def zipball_urls(package_name, versions):
+        # FIXME: The package_name.split-thing can fail here, strangely.
         return ", ".join([f'<a href="{package_name}/zipball/{version["version"]}" '
                           f'download="{package_name.split("/")[1]}-{version["version"]}.zip">{version["version"]}</a>'
                           for version
