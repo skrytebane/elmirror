@@ -282,7 +282,7 @@ def generate_index_html(package_metadatas):
                     f"<dd>{html.escape(versions[0]['summary'])}<br>"
                     f"<strong>Releases:</strong> {zipball_urls(package_name, versions)}</dd></dl>"
                     for (package_name, versions)
-                    in package_metadatas.items()]
+                    in sorted(package_metadatas.items(), key=operator.itemgetter(0))]
 
     return '<!doctype html>\n' + \
            '<html><head><meta charset="UTF-8"><title>Elm packages</title></head><body>' + \
